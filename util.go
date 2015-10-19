@@ -1,13 +1,18 @@
 package util
 
 import (
+  "bytes"
   "errors"
   "fmt"
+  "io/ioutil"
   "log"
-  "golang.org/x/net/html"
   "os"
   "regexp"
   "strings"
+)
+
+import (
+  "golang.org/x/net/html"
 )
 
 var nodeLogger struct {
@@ -121,9 +126,9 @@ func GetText(node *html.Node) string {
       buf.WriteString(n.Data)
     } else {
       s := str(n)
-      buf.writeString(fmt.Sprintf("\n%s\n", s))
+      buf.WriteString(fmt.Sprintf("\n%s\n", s))
       buf.WriteString(GetText(n))
-      buf.writeString(fmt.Sprintf("\n<~%s\n", s))
+      buf.WriteString(fmt.Sprintf("\n<~%s\n", s))
     }
   }
 
@@ -133,7 +138,7 @@ func GetText(node *html.Node) string {
     return ""
   }
 
-  return s
+  return string(s)
 }
 
 // Determines if the file with the given file name, `fname`, exists.

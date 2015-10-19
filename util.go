@@ -15,60 +15,62 @@ import (
   "golang.org/x/net/html"
 )
 
+import (
+  "github.com/jamoozy/util/lg"
+)
+
+
+////////////////////////////////////////////////////////////////////////////////
+//                        Special Logger (debug only)                         //
+////////////////////////////////////////////////////////////////////////////////
+
+// Logger responsible for logging traversal into and out of an HTML tree.
 var nodeLogger struct {
-  l *log.Logger
+  *log.Logger
   indent string
 }
 
+// General logger.
+var l *lg.Logger
+
+// Sets up the util -- may panic if there's an error opening up "node.log" for
+// writing logs.
 func init() {
   file, err := os.Create("node.log")
   if err != nil {
     panic(err.Error())
   }
-  nodeLogger.l = log.New(file, "", 0)
+  nodeLogger.Logger = log.New(file, "", 0)
+  l = lg.New(os.Stdout, "[utl] ", 0, 0, false)
 }
 
+// Logs having visited a node.
 func logNode(n *html.Node) {
   switch n.Type {
   case html.ElementNode:
     str := nodeLogger.indent + str(n)
-    nodeLogger.l.Println(str)
+    nodeLogger.Logger.Println(str)
     nodeLogger.indent += "  "
   default:
-    nodeLogger.l.Printf(`%sSkipping "%s"`, nodeLogger.indent, str(n))
+    nodeLogger.Logger.Printf(`%sSkipping "%s"`, nodeLogger.indent, str(n))
   }
 }
 
+// Logs having left a node.
 func logExit(n *html.Node) {
   switch n.Type {
   case html.ElementNode:
     nodeLogger.indent = nodeLogger.indent[2:]
     str := fmt.Sprintf("%s</%s>", nodeLogger.indent, n.Data)
-    nodeLogger.l.Println(str)
+    nodeLogger.Logger.Println(str)
   }
 }
 
 
 
 ////////////////////////////////////////////////////////////////////////////////
-//                           Richer Logging System                            //
+//                             Prettifying Nodes                              //
 ////////////////////////////////////////////////////////////////////////////////
-
-var indent string
-func l(msg string, args ...interface{}) {
-  //log.Printf(indent + msg, args...)
-}
-func enter(msg string, args ...interface{}) {
-  l("> " + msg, args...)
-  indent += "  "
-}
-func exit(msg string, args ...interface{}) {
-  indent = indent[2:]
-  l("< " + msg, args...)
-}
-func enter_exit(msg string, args ...interface{}) {
-  l("- " + msg, args...)
-}
 
 func str(n *html.Node) string {
   if n == nil {
@@ -101,6 +103,16 @@ func str(n *html.Node) string {
 ////////////////////////////////////////////////////////////////////////////////
 //                                Main Parser                                 //
 ////////////////////////////////////////////////////////////////////////////////
+
+// ---- Convenience.
+
+// Determines if the file with the given file name, `fname`, exists.
+func Exists(fname string) bool {
+  if _, err := os.Stat(fname); os.IsNotExist(err) {
+    return false
+  }
+  return true
+}
 
 // Gets the attribute with the given key from `node`.  Returns the empty string
 // if not found, or if `node` is `nil`.
@@ -141,14 +153,6 @@ func GetText(node *html.Node) string {
   return string(s)
 }
 
-// Determines if the file with the given file name, `fname`, exists.
-func Exists(fname string) bool {
-  if _, err := os.Stat(fname); os.IsNotExist(err) {
-    return false
-  }
-  return true
-}
-
 // Determines if the node is a match for the described node.
 func isMatch(n *html.Node, name, id, class string) (res bool) {
   if !(n.Type == html.ElementNode && n.Data == name) {
@@ -160,20 +164,20 @@ func isMatch(n *html.Node, name, id, class string) (res bool) {
     attrs[attr.Key] = attr.Val
   }
 
-  l("Got %s", attrs)
+  l.Printf("Got %s", attrs)
 
   if id != "" {
-    l(`id = "%s"`, id)
+    l.Printf(`id = "%s"`, id)
     if id != attrs["id"] {
-      l(`attrs["id"] = %s`, attrs["id"])
+      l.Printf(`attrs["id"] = %s`, attrs["id"])
       return false
     }
   }
 
   if class != "" {
-    l(`class = "%s"`, class)
+    l.Printf(`class = "%s"`, class)
     if class != attrs["class"] {
-      l(`attrs["class"] = %s`, attrs["class"])
+      l.Printf(`attrs["class"] = %s`, attrs["class"])
       return false
     }
   }
@@ -197,10 +201,10 @@ func find(root *html.Node, paths map[string]bool) (nodes []*html.Node, err error
 
   if root == nil {
     msg := fmt.Sprintf(`find(nil, "%v"): err`, paths)
-    enter_exit(msg)
+    lg.EnterExit(msg)
     return nil, errors.New(msg)
   }
-  enter(`find(%s, "%v")`, str(root), paths)
+  lg.Enter(`find(%s, "%v")`, str(root), paths)
 
   // Regular expression used to parse CSS.
   css := regexp.MustCompile(`(\w+)(#(\w+))?(\.(\w+))?(\s+(.*))?`)
@@ -219,11 +223,11 @@ func find(root *html.Node, paths map[string]bool) (nodes []*html.Node, err error
     // Parse out the next name, id, and class from the CSS.
     md := css.FindStringSubmatch(path)
     if md == nil {
-      exit("Invalid path.")
+      lg.Exit("Invalid path.")
       return nil, errors.New("Invalid path.")
     }
     name, id, class, remain := md[1], md[3], md[5], md[7]
-    l(`matched: "%s", "%s", "%s", "%s"`, name, id, class, remain)
+    l.Printf(`matched: "%s", "%s", "%s", "%s"`, name, id, class, remain)
 
     // Build next paths.
     if isMatch(root, name, id, class) {
@@ -231,12 +235,12 @@ func find(root *html.Node, paths map[string]bool) (nodes []*html.Node, err error
       // subnodes.
       if remain == "" {
         addNode = true
-        l(`%s fits "%v"`, str(root), paths)
+        l.Printf(`%s fits "%v"`, str(root), paths)
       } else {
         nextPaths[remain] = true
       }
     }
-    l("nextPaths: %v", nextPaths)
+    l.Printf("nextPaths: %v", nextPaths)
   }
 
   if addNode {
@@ -248,15 +252,15 @@ func find(root *html.Node, paths map[string]bool) (nodes []*html.Node, err error
   for c := root.FirstChild; c != nil; c = c.NextSibling {
     subNodes, err := find(c, nextPaths)
     if err != nil {
-      exit("passing along err: " + err.Error())
+      lg.Exit("passing along err: " + err.Error())
       return nil, err
     }
     if subNodes != nil {
-      l("Appending %d nodes.", len(subNodes))
+      l.Printf("Appending %d nodes.", len(subNodes))
       nodes = append(nodes, subNodes...)
     }
   }
 
-  exit(`find(%s, %v): %d nodes`, str(root), paths, len(nodes))
+  lg.Exit(`find(%s, %v): %d nodes`, str(root), paths, len(nodes))
   return nodes, nil
 }

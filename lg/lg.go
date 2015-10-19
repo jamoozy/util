@@ -24,6 +24,8 @@ func init() {
   flag.Var(&vv, "verbosity", "Set verbosity in [-3,3].")
 }
 
+// ---- Actual flag definition (using Value interface).
+
 // Custom verbosity variable.
 type verbVar struct {
   v int8
@@ -31,7 +33,7 @@ type verbVar struct {
 
 // Shows verbosity.
 func (v *verbVar) String() string {
-  return string(v.v)
+  return fmt.Sprintf("%d", v.v)
 }
 
 // Ups the verbosity
@@ -60,8 +62,7 @@ type Logger struct {
 // Expanded logging util.  `level` is the level at or above which this logger
 // will log.  `enabled` is whether to enable the logger.
 func New(out io.Writer, prefix string, flag, level int, enabled bool) *Logger {
-  return &Logger{log.New(out, fmt.Sprintf("[%s] ", prefix), flag),
-                 int8(level), enabled}
+  return &Logger{log.New(out, prefix, flag), int8(level), enabled, ""}
 }
 
 // En- or disables the Logger.
@@ -69,9 +70,21 @@ func (l *Logger) Enable(enable bool) {
   l.enabled = enable
 }
 
-// En- or disables the logger based on the passed verbosity level, v.
-func (l *Logger) set(v int8) {
-  l.enabled = v >= l.activeLevel
+// Overwrite default log behavior to include the indent string.
+func (l *Logger) Print(v ...interface{}) {
+  if l.enabled && l.activeLevel >= level {
+    l.Output(calldepth, indent + fmt.Sprint(v))
+  }
+}
+func (l *Logger) Printf(format string, v ...interface{}) {
+  if l.enabled && l.activeLevel >= level {
+    l.Output(calldepth, indent + fmt.Sprintf(format, v...))
+  }
+}
+func (l *Logger) Println(v ...interface{}) {
+  if l.enabled && l.activeLevel >= level {
+    l.Output(calldepth, indent + fmt.Sprintln(v...))
+  }
 }
 
 
@@ -83,39 +96,72 @@ func (l *Logger) set(v int8) {
 // Printing at various levels of urgency.  These loggers log to their respective
 // locations (or not) based on the verbosity level that was set.
 var (
-  TrcLg = New(os.Stdout, "trc", 0,  3, false)   // Trace logger.
-  DbgLg = New(os.Stdout, "dbg", 0,  2, false)   // Debug logger.
-  VrbLg = New(os.Stdout, "vrb", 0,  1, false)   // Verbose logger.
-  IfoLg = New(os.Stdout, "ifo", 0,  0,  true)   // Info logger.
-  WrnLg = New(os.Stdout, "wrn", 0, -1,  true)   // Warn logger.
-  ErrLg = New(os.Stderr, "err", 0, -2,  true)   // Error logger.
-  FtlLg = New(os.Stderr, "ftl", 0, -3,  true)   // Fatal logger.
+  TrcLg = New(os.Stdout, "[trc] ", 0,  3, false)   // Trace logger.
+  DbgLg = New(os.Stdout, "[dbg] ", 0,  2, false)   // Debug logger.
+  VrbLg = New(os.Stdout, "[vrb] ", 0,  1, false)   // Verbose logger.
+  IfoLg = New(os.Stdout, "[ifo] ", 0,  0,  true)   // Info logger.
+  WrnLg = New(os.Stdout, "[wrn] ", 0, -1,  true)   // Warn logger.
+  ErrLg = New(os.Stderr, "[err] ", 0, -2,  true)   // Error logger.
+  FtlLg = New(os.Stderr, "[ftl] ", 0, -3,  true)   // Fatal logger.
 )
 
 // Convenience variable used for looping through all the loggers to perform the
 // same task on all of them.
 var lgs = []*Logger{TrcLg, DbgLg, VrbLg, IfoLg, WrnLg, ErrLg, FtlLg}
 
+// Log level we're currently at.
+var level int8
+
+// Variables used for indenting.
+var (
+  indent string   // The actual text of the indentation (usually jut a bunch of
+                  // spaces).
+  calldepth int   // The number of indents.
+)
+
 // Sets the verbosity level.  If v is too large or too small, sets verbosity to
 // the closest level, and returns an error.
 func Set(v int8) (err error) {
   // Verify a good range.
-  if v < -2 {
-    err = errors.New(fmt.Sprintf("%d , min:-2", v))
+  if v < -3 {
+    err = errors.New(fmt.Sprintf("%d , min:-3", v))
   } else if 3 < v {
     err = errors.New(fmt.Sprintf("%d > max:3", v))
   }
 
-  // Set regardless.
-  for _, lg := range lgs {
-    lg.set(v)
-  }
+  // Set the level regardless of error state.
+  level = v
 
   // Hopefully return nil.
   return err
 }
 
 // Convenience, so you don't have to do, e.g., lg.TrcLg.Printf(...) yourself.
+
+// Lots an entrance to a function.
+func Enter(format string, v ...interface{}) {
+  if TrcLg.enabled {
+    TrcLg.Printf("--> " + format, v...)
+    indent += "  "
+    calldepth += 2
+  }
+}
+
+// Logs the entrance and immediate exit to a function.
+func EnterExit(format string, args ...interface{}) {
+  if TrcLg.enabled {
+    TrcLg.Printf("- " + format, args...)
+  }
+}
+
+// Logs the exit a function.
+func Exit(format string, args ...interface{}) {
+  if TrcLg.enabled {
+    indent = indent[2:]
+    calldepth -= 2
+    TrcLg.Printf("<-- " + format, args...)
+  }
+}
 
 // Print at or above "trace" verbosity level.
 func Trc(fmt string, args ...interface{}) {
